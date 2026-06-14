@@ -10,9 +10,36 @@
   // A janela principal que a abriu vira "controle" e comanda via BroadcastChannel.
   const params = new URLSearchParams(location.search);
   const isProjection = params.get("mode") === "projection";
-  const channel = ("BroadcastChannel" in window) ? new BroadcastChannel("sorteador") : null;
+
+  // Token único por roleta: isola a comunicação entre cada controle e a SUA
+  // projeção. Assim, várias roletas abertas (abas/janelas) não interferem
+  // umas nas outras. A projeção herda o token do controle via URL; o controle
+  // mantém o token na sessionStorage para sobreviver a um reload.
+  function newToken() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+  const wheelToken = isProjection
+    ? (params.get("token") || "default")
+    : (sessionStorage.getItem("wheelToken") || (() => {
+        const t = newToken();
+        sessionStorage.setItem("wheelToken", t);
+        return t;
+      })());
+
+  // Canal exclusivo desta roleta (o nome carrega o token).
+  const channel = ("BroadcastChannel" in window)
+    ? new BroadcastChannel("sorteador:" + wheelToken)
+    : null;
+
+  // Envia uma mensagem carimbada com o token desta roleta.
+  function send(msg) {
+    if (channel) channel.postMessage({ ...msg, token: wheelToken });
+  }
+
   let projectionWin = null;   // referencia da janela de projeção (na janela de controle)
   let spinFallback = null;    // timeout de seguranca ao delegar o giro
+  let pendingHistory = null;  // histórico retido até a roleta parar (modo controlador)
 
   function controllerActive() {
     return !isProjection && projectionWin && !projectionWin.closed;
@@ -116,7 +143,7 @@
   }
 
   function pushRefresh() {
-    if (channel && controllerActive()) channel.postMessage({ type: "refresh" });
+    if (controllerActive()) send({ type: "refresh" });
   }
 
   async function applyText() {
@@ -165,7 +192,7 @@
       if (controllerActive()) {
         // Delega a animação para a janela de projeção.
         delegated = true;
-        channel.postMessage({
+        send({
           type: "spin",
           winner: data.winner,
           visibleIndex: data.visibleIndex,
@@ -176,12 +203,15 @@
         });
         clearTimeout(spinFallback);
         spinFallback = setTimeout(() => {
+          // Fallback: se a projeção não responder, aplica o histórico pendente.
+          if (pendingHistory) { state.history = pendingHistory; pendingHistory = null; renderHistory(); }
           spinning = false;
           setSpinDisabled(false);
         }, state.config.spinDurationMs + 5000);
-        // Atualiza lista/histórico no controle (o vencedor já saiu da roda).
+        // Atualiza a lista de entradas agora (o vencedor já saiu da roda),
+        // mas retém o histórico até a roleta parar na projeção.
         state.entries = data.entries;
-        state.history = data.history;
+        pendingHistory = data.history;
         render();
       } else {
         // Anima localmente (janela normal ou a própria projeção).
@@ -192,7 +222,7 @@
         showWinner(data.winner);
         render(false); // mantém o vencedor na roda até fechar o modal
         // Se o giro partiu da projeção, avisa o controle para sincronizar.
-        if (isProjection && channel) channel.postMessage({ type: "refresh" });
+        if (isProjection) send({ type: "refresh" });
       }
     } finally {
       if (!delegated) {
@@ -213,7 +243,7 @@
     showWinner(m.winner);
     render(false); // mantém o vencedor na roda até fechar o modal
     spinning = false;
-    if (channel) channel.postMessage({ type: "winner-shown" });
+    send({ type: "winner-shown" });
   }
 
   function showWinner(entry) {
@@ -225,7 +255,7 @@
   function closeWinner() {
     $("#winnerModal").classList.add("hidden");
     wheel.setEntries(state.entries); // só agora o sorteado sai da roda
-    if (channel && controllerActive()) channel.postMessage({ type: "close-modal" });
+    if (controllerActive()) send({ type: "close-modal" });
   }
 
   // ---------- Tela cheia (projeção) ----------
@@ -240,6 +270,8 @@
   if (channel) {
     channel.onmessage = (ev) => {
       const m = ev.data || {};
+      // Ignora mensagens de outra roleta (proteção extra além do canal isolado).
+      if (m.token && m.token !== wheelToken) return;
       if (isProjection) {
         if (m.type === "spin") doProjectionSpin(m);
         else if (m.type === "close-modal") {
@@ -249,6 +281,7 @@
         else if (m.type === "refresh") loadState();
       } else if (m.type === "winner-shown") {
         clearTimeout(spinFallback);
+        if (pendingHistory) { state.history = pendingHistory; pendingHistory = null; renderHistory(); }
         spinning = false;
         setSpinDisabled(false);
       } else if (m.type === "refresh") {
@@ -272,17 +305,56 @@
     document.body.classList.remove("controller-mode");
   });
 
-  // Botão "Projeção": abre nova janela e vira controle
-  $("#btnProjection").addEventListener("click", () => {
+  // ---------- Dropdown tela cheia ----------
+  function toggleFsMenu(e) {
+    e.stopPropagation();
+    $("#fsMenu").classList.toggle("hidden");
+  }
+  function closeFsMenu() { $("#fsMenu").classList.add("hidden"); }
+  $("#btnFullscreen").addEventListener("click", toggleFsMenu);
+  document.addEventListener("click", closeFsMenu);
+  $("#fsMenu").addEventListener("click", (e) => e.stopPropagation());
+
+  // Opção 1: tela cheia única (mesma janela, sem config)
+  function enterSingleFs() {
+    closeFsMenu();
+    document.body.classList.add("single-fs-mode");
+    $("#btnExitSingle").classList.remove("hidden");
+    document.documentElement.requestFullscreen?.().catch(() => {});
+    // Recalcula canvas após transição de layout
+    requestAnimationFrame(() => { wheel._resizeForDPR(); wheel.draw(); });
+  }
+  function exitSingleFs() {
+    document.body.classList.remove("single-fs-mode");
+    $("#btnExitSingle").classList.add("hidden");
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    wheel._resizeForDPR();
+    wheel.draw();
+  }
+  $("#btnFsSingle").addEventListener("click", enterSingleFs);
+  $("#btnExitSingle").addEventListener("click", exitSingleFs);
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && document.body.classList.contains("single-fs-mode")) {
+      exitSingleFs();
+    }
+  });
+
+  // Opção 2: tela cheia + controles (projeção em nova janela)
+  function openProjection() {
+    closeFsMenu();
     if (controllerActive()) { projectionWin.focus(); return; }
-    projectionWin = window.open(location.pathname + "?mode=projection", "sorteador_projecao");
+    const url = location.pathname + "?mode=projection&token=" + encodeURIComponent(wheelToken);
+    projectionWin = window.open(url, "sorteador_projecao_" + wheelToken);
     if (!projectionWin) {
       alert("Permita pop-ups para abrir a janela de projeção.");
       return;
     }
+    const status = document.querySelector(".ctrl-status");
+    if (status) status.textContent = `🖥 Projeção ativa · roleta #${wheelToken.slice(0, 4)}`;
     document.body.classList.add("controller-mode");
-    setTimeout(pushRefresh, 800); // sincroniza assim que a projeção carregar
-  });
+    setTimeout(pushRefresh, 800);
+  }
+  $("#btnFsProjection").addEventListener("click", openProjection);
 
   // Sai do modo controle se a projeção for fechada manualmente
   setInterval(() => {

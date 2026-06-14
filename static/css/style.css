@@ -112,7 +112,7 @@ body {
   box-shadow: var(--shadow);
   overflow: hidden;
 }
-.tabs { display: flex; border-bottom: 1px solid var(--border); }
+.tabs { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); position: relative; }
 .tab {
   flex: 1;
   padding: 14px;
@@ -124,6 +124,85 @@ body {
   cursor: pointer;
 }
 .tab.active { color: var(--text); box-shadow: inset 0 -3px 0 var(--primary); }
+.tab-spacer { flex: 1; }
+.tab-action {
+  padding: 0 14px;
+  border-radius: 0;
+  border: none;
+  font-size: 18px;
+  color: var(--muted);
+  line-height: 1;
+  align-self: center;
+}
+.tab-action:hover { color: var(--text); }
+
+/* ---------- Dropdown tela cheia ---------- */
+.fs-menu-wrap { position: relative; display: flex; align-items: center; padding-inline: 1rem; }
+.fs-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  min-width: 210px;
+  z-index: 30;
+  animation: pop 0.15s ease;
+}
+.fs-menu.hidden { display: none; }
+.fs-option {
+  display: block;
+  width: 100%;
+  padding: 13px 18px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.fs-option:hover { background: var(--panel); }
+.fs-option + .fs-option { border-top: 1px solid var(--border); }
+
+/* ---------- Modo tela cheia única ---------- */
+.single-fs-mode { background: #07091a; overflow: hidden; }
+.single-fs-mode .topbar,
+.single-fs-mode .side-col,
+.single-fs-mode .wheel-controls,
+.single-fs-mode .controller-panel { display: none !important; }
+.single-fs-mode .layout {
+  grid-template-columns: 1fr;
+  max-width: none;
+  padding: 0;
+  min-height: 100vh;
+}
+.single-fs-mode .wheel-col { justify-content: center; min-height: 100vh; }
+.single-fs-mode .wheel-stage { width: min(92vh, 92vw); }
+
+.exit-single {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 50;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.exit-single.hidden { display: none; }
+.single-fs-mode:hover .exit-single,
+.single-fs-mode .exit-single:focus { opacity: 1; }
 .tab-panel { display: none; padding: 18px; }
 .tab-panel.active { display: block; }
 
@@ -214,6 +293,7 @@ body {
 .btn.small { padding: 6px 10px; font-size: 12px; }
 
 .row-between { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+.btn-group { display: flex; gap: 8px; }
 .muted { color: var(--muted); font-size: 13px; }
 
 /* ---------- Painel de controle (controller-mode) ---------- */

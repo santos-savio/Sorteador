@@ -10,8 +10,6 @@
   <header class="topbar">
     <h1 id="appTitle" class="app-title" contenteditable="true" spellcheck="false">Sorteador</h1>
     <div class="topbar-actions">
-      <button id="btnProjection" class="btn ghost" title="Abrir projeção em nova janela">🖥 Projeção</button>
-      <button id="btnShuffle" class="btn ghost" title="Embaralhar">🔀 Embaralhar</button>
       <button id="btnExport" class="btn ghost" title="Exportar JSON">⬇ Exportar</button>
       <label class="btn ghost" title="Importar JSON">
         ⬆ Importar
@@ -49,6 +47,14 @@
         <button class="tab active" data-tab="entries">Lista</button>
         <button class="tab" data-tab="config">Config</button>
         <button class="tab" data-tab="history">Sorteados</button>
+        <div class="tab-spacer"></div>
+        <div class="fs-menu-wrap">
+          <button id="btnFullscreen" class="btn ghost tab-action" title="Tela cheia">⛶</button>
+          <div id="fsMenu" class="fs-menu hidden">
+            <button id="btnFsSingle" class="fs-option">⛶&nbsp; Tela cheia</button>
+            <button id="btnFsProjection" class="fs-option">🖥&nbsp; Tela cheia + controles</button>
+          </div>
+        </div>
       </nav>
 
       <!-- Aba: lista de entradas -->
@@ -60,7 +66,10 @@
           placeholder="Digite um nome por linha..."></textarea>
         <div class="row-between">
           <span id="entryCount" class="muted">0 entradas</span>
-          <button id="btnApplyText" class="btn">Aplicar lista</button>
+          <div class="btn-group">
+            <button id="btnShuffle" class="btn ghost" title="Embaralhar">🔀 Embaralhar</button>
+            <button id="btnApplyText" class="btn">Aplicar lista</button>
+          </div>
         </div>
 
         <details class="advanced">
@@ -120,6 +129,9 @@
 
   <!-- Dica de tela cheia (modo projeção) -->
   <div id="fsHint" class="fs-hint hidden">Clique para tela cheia · F11</div>
+
+  <!-- Botão de saída do modo tela cheia única -->
+  <button id="btnExitSingle" class="exit-single hidden" title="Sair da tela cheia">✕</button>
 
   <script src="{{ url_for('static', filename='js/wheel.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
