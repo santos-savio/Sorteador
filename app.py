@@ -237,7 +237,15 @@ def api_spin():
         }), 409
 
     entry = _state["entries"][winner_idx]
-    entry["drawn"] = True
+
+    # Snapshot da roda no momento do giro (habilitadas e ainda nao sorteadas).
+    # Sao copias, para nao serem afetadas pela marcacao de "drawn" feita abaixo.
+    visible = [dict(e) for e in _state["entries"]
+               if e.get("enabled", True) and not e.get("drawn")]
+    visible_index = next(
+        (i for i, e in enumerate(visible) if e["id"] == entry["id"]), 0)
+
+    # Registra o sorteado (sempre, inclusive quando o giro parte da projecao).
     record = {
         "id": uuid.uuid4().hex,
         "entryId": entry["id"],
@@ -245,11 +253,18 @@ def api_spin():
         "at": now_iso(),
     }
     _state["history"].insert(0, record)
+
+    # No modo exclusivo, marca como sorteado -> sai da roda/lista ativa.
+    if _state["config"].get("mode") == "unique":
+        entry["drawn"] = True
+
     save_state()
 
     return jsonify({
         "winnerIndex": winner_idx,
         "winner": entry,
+        "visibleIndex": visible_index,   # posicao do vencedor entre as fatias do giro
+        "spinEntries": visible,          # itens/ordem da roda no giro (vencedor incluido)
         "entries": _state["entries"],
         "history": _state["history"],
     })

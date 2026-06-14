@@ -10,6 +10,7 @@
   <header class="topbar">
     <h1 id="appTitle" class="app-title" contenteditable="true" spellcheck="false">Sorteador</h1>
     <div class="topbar-actions">
+      <button id="btnProjection" class="btn ghost" title="Abrir projeção em nova janela">🖥 Projeção</button>
       <button id="btnShuffle" class="btn ghost" title="Embaralhar">🔀 Embaralhar</button>
       <button id="btnExport" class="btn ghost" title="Exportar JSON">⬇ Exportar</button>
       <label class="btn ghost" title="Importar JSON">
@@ -30,6 +31,15 @@
       </div>
       <div class="wheel-controls">
         <button id="btnSpin" class="btn primary big">Girar a roda</button>
+      </div>
+
+      <!-- Painel de controle (visível quando a projeção está aberta) -->
+      <div id="controllerPanel" class="controller-panel">
+        <div class="ctrl-status">🖥 Projeção ativa em outra janela</div>
+        <button id="ctrlSpin" class="btn primary big">Sortear</button>
+        <button id="ctrlCloseWinner" class="btn ghost big">Fechar ganhador</button>
+        <button id="ctrlEnd" class="btn ghost danger">Encerrar projeção</button>
+        <div class="muted">Atalhos: <b>Ctrl+Enter</b> sorteia · <b>Enter</b> fecha o ganhador</div>
       </div>
     </section>
 
@@ -107,6 +117,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Dica de tela cheia (modo projeção) -->
+  <div id="fsHint" class="fs-hint hidden">Clique para tela cheia · F11</div>
 
   <script src="{{ url_for('static', filename='js/wheel.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>

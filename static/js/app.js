@@ -5,6 +5,19 @@
   const state = { entries: [], config: {}, history: [] };
   const wheel = new Wheel($("#wheel"));
 
+  // ---------- Modo projeção / controle ----------
+  // A janela com ?mode=projection mostra so a roda em tela cheia (sem config).
+  // A janela principal que a abriu vira "controle" e comanda via BroadcastChannel.
+  const params = new URLSearchParams(location.search);
+  const isProjection = params.get("mode") === "projection";
+  const channel = ("BroadcastChannel" in window) ? new BroadcastChannel("sorteador") : null;
+  let projectionWin = null;   // referencia da janela de projeção (na janela de controle)
+  let spinFallback = null;    // timeout de seguranca ao delegar o giro
+
+  function controllerActive() {
+    return !isProjection && projectionWin && !projectionWin.closed;
+  }
+
   // Som simples de "tick" via WebAudio (sem arquivos externos).
   let audioCtx = null;
   function tick() {
@@ -38,17 +51,17 @@
   };
 
   // ---------- Render ----------
-  function render() {
-    // titulo
+  // syncWheel=false mantém a roda como está (usado após o giro, para só remover
+  // o sorteado quando o modal do vencedor for fechado).
+  function render(syncWheel = true) {
     $("#appTitle").textContent = state.config.title || "Sorteador";
 
-    // textarea
     if (document.activeElement !== $("#entriesText")) {
       $("#entriesText").value = state.entries.map((e) => e.text).join("\n");
     }
-    $("#entryCount").textContent = `${state.entries.length} entradas`;
+    const avail = state.entries.filter((e) => e.enabled && !e.drawn).length;
+    $("#entryCount").textContent = `${state.entries.length} entradas · ${avail} na roda`;
 
-    // config
     $("#cfgDuration").value = state.config.spinDurationMs;
     $("#durLabel").textContent = (state.config.spinDurationMs / 1000).toFixed(1) + "s";
     $("#cfgMode").value = state.config.mode;
@@ -57,7 +70,7 @@
 
     renderAdvanced();
     renderHistory();
-    wheel.setEntries(state.entries);
+    if (syncWheel) wheel.setEntries(state.entries);
   }
 
   function renderAdvanced() {
@@ -99,6 +112,11 @@
   async function loadState() {
     Object.assign(state, await api.get("/api/state"));
     render();
+    if (isProjection) { wheel._resizeForDPR(); wheel.draw(); }
+  }
+
+  function pushRefresh() {
+    if (channel && controllerActive()) channel.postMessage({ type: "refresh" });
   }
 
   async function applyText() {
@@ -106,53 +124,96 @@
     const { data } = await api.post("/api/entries", { entries: lines });
     Object.assign(state, data);
     render();
+    pushRefresh();
   }
 
-  // Salva o editor avancado enviando os objetos completos.
   async function saveAdvanced() {
     const { data } = await api.post("/api/entries", { entries: state.entries });
     Object.assign(state, data);
     render();
+    pushRefresh();
   }
 
   async function saveConfig(patch) {
     const { data } = await api.post("/api/config", patch);
     state.config = data;
     render();
+    pushRefresh();
   }
 
+  // ---------- Giro ----------
   let spinning = false;
+
+  function setSpinDisabled(v) {
+    ["#btnSpin", "#spinCenter", "#ctrlSpin"].forEach((s) => {
+      const el = $(s);
+      if (el) el.disabled = v;
+    });
+  }
+
   async function spin() {
     if (spinning) return;
     spinning = true;
     setSpinDisabled(true);
+    let delegated = false;
     try {
-      const { ok, status, data } = await api.post("/api/spin", {});
+      const { ok, data } = await api.post("/api/spin", {});
       if (!ok) {
         alert(data.message || "Nao foi possivel sortear.");
         return;
       }
-      // Atualiza entradas (a ordem pode ter mudado se shuffleOnSpin estiver ligado).
-      state.entries = data.entries;
-      state.history = data.history;
-      wheel.setEntries(state.entries);
-
-      // Mapeia o vencedor para o indice entre as fatias visiveis (habilitadas).
-      const enabled = state.entries.filter((e) => e.enabled);
-      const visIdx = enabled.findIndex((e) => e.id === data.winner.id);
-
-      await wheel.spinTo(visIdx, state.config.spinDurationMs);
-      showWinner(data.winner);
-      render();
+      if (controllerActive()) {
+        // Delega a animação para a janela de projeção.
+        delegated = true;
+        channel.postMessage({
+          type: "spin",
+          winner: data.winner,
+          visibleIndex: data.visibleIndex,
+          spinEntries: data.spinEntries,
+          entries: data.entries,
+          history: data.history,
+          durationMs: state.config.spinDurationMs,
+        });
+        clearTimeout(spinFallback);
+        spinFallback = setTimeout(() => {
+          spinning = false;
+          setSpinDisabled(false);
+        }, state.config.spinDurationMs + 5000);
+        // Atualiza lista/histórico no controle (o vencedor já saiu da roda).
+        state.entries = data.entries;
+        state.history = data.history;
+        render();
+      } else {
+        // Anima localmente (janela normal ou a própria projeção).
+        wheel.setEntries(data.spinEntries);
+        await wheel.spinTo(data.visibleIndex, state.config.spinDurationMs);
+        state.entries = data.entries;
+        state.history = data.history;
+        showWinner(data.winner);
+        render(false); // mantém o vencedor na roda até fechar o modal
+        // Se o giro partiu da projeção, avisa o controle para sincronizar.
+        if (isProjection && channel) channel.postMessage({ type: "refresh" });
+      }
     } finally {
-      spinning = false;
-      setSpinDisabled(false);
+      if (!delegated) {
+        spinning = false;
+        setSpinDisabled(false);
+      }
     }
   }
 
-  function setSpinDisabled(v) {
-    $("#btnSpin").disabled = v;
-    $("#spinCenter").disabled = v;
+  // Executa o giro na janela de projeção a partir do comando do controle.
+  async function doProjectionSpin(m) {
+    if (spinning) return;
+    spinning = true;
+    wheel.setEntries(m.spinEntries);
+    await wheel.spinTo(m.visibleIndex, m.durationMs);
+    state.entries = m.entries;
+    state.history = m.history;
+    showWinner(m.winner);
+    render(false); // mantém o vencedor na roda até fechar o modal
+    spinning = false;
+    if (channel) channel.postMessage({ type: "winner-shown" });
   }
 
   function showWinner(entry) {
@@ -161,10 +222,90 @@
     $("#winnerModal").classList.remove("hidden");
   }
 
+  function closeWinner() {
+    $("#winnerModal").classList.add("hidden");
+    wheel.setEntries(state.entries); // só agora o sorteado sai da roda
+    if (channel && controllerActive()) channel.postMessage({ type: "close-modal" });
+  }
+
+  // ---------- Tela cheia (projeção) ----------
+  function tryFullscreen() {
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      el.requestFullscreen().catch(() => {});
+    }
+  }
+
+  // ---------- Mensagens entre janelas ----------
+  if (channel) {
+    channel.onmessage = (ev) => {
+      const m = ev.data || {};
+      if (isProjection) {
+        if (m.type === "spin") doProjectionSpin(m);
+        else if (m.type === "close-modal") {
+          $("#winnerModal").classList.add("hidden");
+          wheel.setEntries(state.entries); // remove o sorteado da roda na projeção
+        }
+        else if (m.type === "refresh") loadState();
+      } else if (m.type === "winner-shown") {
+        clearTimeout(spinFallback);
+        spinning = false;
+        setSpinDisabled(false);
+      } else if (m.type === "refresh") {
+        // A projeção sorteou por conta própria: sincroniza lista/histórico.
+        loadState();
+      }
+    };
+  }
+
   // ---------- Eventos ----------
   $("#btnSpin").addEventListener("click", spin);
   $("#spinCenter").addEventListener("click", spin);
   $("#btnApplyText").addEventListener("click", applyText);
+
+  // Painel de controle
+  $("#ctrlSpin").addEventListener("click", spin);
+  $("#ctrlCloseWinner").addEventListener("click", closeWinner);
+  $("#ctrlEnd").addEventListener("click", () => {
+    if (projectionWin && !projectionWin.closed) projectionWin.close();
+    projectionWin = null;
+    document.body.classList.remove("controller-mode");
+  });
+
+  // Botão "Projeção": abre nova janela e vira controle
+  $("#btnProjection").addEventListener("click", () => {
+    if (controllerActive()) { projectionWin.focus(); return; }
+    projectionWin = window.open(location.pathname + "?mode=projection", "sorteador_projecao");
+    if (!projectionWin) {
+      alert("Permita pop-ups para abrir a janela de projeção.");
+      return;
+    }
+    document.body.classList.add("controller-mode");
+    setTimeout(pushRefresh, 800); // sincroniza assim que a projeção carregar
+  });
+
+  // Sai do modo controle se a projeção for fechada manualmente
+  setInterval(() => {
+    if (document.body.classList.contains("controller-mode") &&
+        (!projectionWin || projectionWin.closed)) {
+      document.body.classList.remove("controller-mode");
+      projectionWin = null;
+    }
+  }, 1500);
+
+  // Atalhos de teclado
+  document.addEventListener("keydown", (e) => {
+    const modalOpen = !$("#winnerModal").classList.contains("hidden");
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (!spinning && !modalOpen) spin();
+      return;
+    }
+    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && modalOpen) {
+      e.preventDefault();
+      closeWinner();
+    }
+  });
 
   // tabs
   document.querySelectorAll(".tab").forEach((tab) => {
@@ -216,6 +357,7 @@
     const { data } = await api.post("/api/shuffle", {});
     state.entries = data;
     render();
+    pushRefresh();
   });
   $("#btnExport").addEventListener("click", () => { window.location = "/api/export"; });
   $("#fileImport").addEventListener("change", async (ev) => {
@@ -227,6 +369,7 @@
       if (!ok) { alert("JSON invalido."); return; }
       Object.assign(state, data);
       render();
+      pushRefresh();
     } catch (_) { alert("Nao foi possivel ler o arquivo JSON."); }
     ev.target.value = "";
   });
@@ -235,23 +378,35 @@
     const { data } = await api.post("/api/reset", { clearHistory: true });
     Object.assign(state, data);
     render();
+    pushRefresh();
   });
   $("#btnClearHistory").addEventListener("click", async () => {
     const { data } = await api.post("/api/reset", { clearHistory: true });
     Object.assign(state, data);
     render();
+    pushRefresh();
   });
 
   // modal
-  $("#btnCloseModal").addEventListener("click", () => $("#winnerModal").classList.add("hidden"));
+  $("#btnCloseModal").addEventListener("click", closeWinner);
   $("#btnRemoveWinner").addEventListener("click", async () => {
     const id = $("#winnerModal").dataset.winnerId;
     state.entries = state.entries.filter((e) => e.id !== id);
     await saveAdvanced();
-    $("#winnerModal").classList.add("hidden");
+    closeWinner();
   });
 
   window.addEventListener("resize", () => { wheel._resizeForDPR(); wheel.draw(); });
+
+  // ---------- Inicialização do modo projeção ----------
+  if (isProjection) {
+    document.body.classList.add("projection-mode");
+    // A dica de tela cheia aparece por apenas 2,5s após abrir a projeção.
+    const hint = $("#fsHint");
+    hint.classList.remove("hidden");
+    setTimeout(() => hint.classList.add("hidden"), 2500);
+    document.body.addEventListener("click", tryFullscreen);
+  }
 
   loadState();
 })();

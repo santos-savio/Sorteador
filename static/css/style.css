@@ -216,6 +216,55 @@ body {
 .row-between { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
 .muted { color: var(--muted); font-size: 13px; }
 
+/* ---------- Painel de controle (controller-mode) ---------- */
+.controller-panel { display: none; }
+.controller-mode .wheel-stage,
+.controller-mode .wheel-controls { display: none; }
+.controller-mode .controller-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 40px 32px;
+}
+.controller-panel .ctrl-status { color: var(--muted); font-size: 15px; }
+.controller-panel .big { width: 100%; max-width: 320px; }
+
+/* ---------- Modo projeção (janela projetada) ---------- */
+.projection-mode { background: #07091a; overflow: hidden; }
+.projection-mode .topbar,
+.projection-mode .side-col,
+.projection-mode .wheel-controls,
+.projection-mode .controller-panel { display: none !important; }
+.projection-mode .layout {
+  grid-template-columns: 1fr;
+  max-width: none;
+  padding: 0;
+  min-height: 100vh;
+}
+.projection-mode .wheel-col { justify-content: center; min-height: 100vh; }
+.projection-mode .wheel-stage { width: min(92vh, 92vw); }
+
+.fs-hint {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  z-index: 40;
+  pointer-events: none;
+}
+.fs-hint.hidden { display: none; }
+
 /* ---------- Modal ---------- */
 .modal {
   position: fixed; inset: 0;

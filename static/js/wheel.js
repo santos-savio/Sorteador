@@ -22,7 +22,8 @@ class Wheel {
   }
 
   setEntries(entries) {
-    this.entries = entries.filter((e) => e.enabled);
+    // Apenas habilitadas e ainda nao sorteadas aparecem na roda.
+    this.entries = entries.filter((e) => e.enabled && !e.drawn);
     this.draw();
   }
 
@@ -148,7 +149,7 @@ class Wheel {
     return new Promise((resolve) => {
       const frame = (now) => {
         const t = Math.min(1, (now - startTime) / durationMs);
-        const eased = this._easeOutCubic(t);
+        const eased = this._easeInOut(t);
         this.rotation = startRotation + finalDelta * eased;
         this.draw();
         this._maybeTick();
@@ -163,7 +164,10 @@ class Wheel {
     });
   }
 
-  _easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  // Comeca devagar, acelera no meio e desacelera no fim (ease-in-out cubico).
+  _easeInOut(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
 
   /* Dispara onTick quando a fatia sob o ponteiro muda (efeito de "click"). */
   _maybeTick() {
