@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sorteador</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="appTitle" class="app-title" contenteditable="true" spellcheck="false">Sorteador</h1>
+    <div class="topbar-actions">
+      <button id="btnShuffle" class="btn ghost" title="Embaralhar">🔀 Embaralhar</button>
+      <button id="btnExport" class="btn ghost" title="Exportar JSON">⬇ Exportar</button>
+      <label class="btn ghost" title="Importar JSON">
+        ⬆ Importar
+        <input id="fileImport" type="file" accept="application/json" hidden>
+      </label>
+      <button id="btnReset" class="btn ghost danger" title="Reiniciar sorteados">↺ Reiniciar</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Coluna da roda -->
+    <section class="wheel-col">
+      <div class="wheel-stage">
+        <canvas id="wheel" width="560" height="560"></canvas>
+        <button id="spinCenter" class="spin-center" title="Girar">GIRAR</button>
+        <div class="pointer"></div>
+      </div>
+      <div class="wheel-controls">
+        <button id="btnSpin" class="btn primary big">Girar a roda</button>
+      </div>
+    </section>
+
+    <!-- Coluna lateral -->
+    <aside class="side-col">
+      <nav class="tabs">
+        <button class="tab active" data-tab="entries">Lista</button>
+        <button class="tab" data-tab="config">Config</button>
+        <button class="tab" data-tab="history">Sorteados</button>
+      </nav>
+
+      <!-- Aba: lista de entradas -->
+      <div class="tab-panel active" data-panel="entries">
+        <div class="panel-hint">
+          Uma entrada por linha. Use o editor avançado para cor, peso e ativar/desativar.
+        </div>
+        <textarea id="entriesText" class="entries-text" spellcheck="false"
+          placeholder="Digite um nome por linha..."></textarea>
+        <div class="row-between">
+          <span id="entryCount" class="muted">0 entradas</span>
+          <button id="btnApplyText" class="btn">Aplicar lista</button>
+        </div>
+
+        <details class="advanced">
+          <summary>Editor avançado (por linha)</summary>
+          <div id="advancedList" class="advanced-list"></div>
+        </details>
+      </div>
+
+      <!-- Aba: configuracao -->
+      <div class="tab-panel" data-panel="config">
+        <label class="field">
+          <span>Tempo do giro: <b id="durLabel">6.0s</b></span>
+          <input id="cfgDuration" type="range" min="1000" max="20000" step="500" value="6000">
+        </label>
+
+        <label class="field">
+          <span>Modo de sorteio</span>
+          <select id="cfgMode">
+            <option value="repeat">Permitir repetidos</option>
+            <option value="unique">Somente exclusivos (remove vencedor)</option>
+          </select>
+        </label>
+
+        <label class="check">
+          <input id="cfgShuffle" type="checkbox">
+          <span>Embaralhar antes de cada giro</span>
+        </label>
+
+        <label class="check">
+          <input id="cfgSound" type="checkbox" checked>
+          <span>Som durante o giro</span>
+        </label>
+      </div>
+
+      <!-- Aba: historico -->
+      <div class="tab-panel" data-panel="history">
+        <div class="row-between">
+          <span class="muted">Resultados salvos</span>
+          <button id="btnClearHistory" class="btn small">Limpar</button>
+        </div>
+        <ol id="historyList" class="history-list"></ol>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Modal do vencedor -->
+  <div id="winnerModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-label">🎉 Vencedor</div>
+      <div id="winnerName" class="winner-name"></div>
+      <div class="modal-actions">
+        <button id="btnRemoveWinner" class="btn ghost">Remover da lista</button>
+        <button id="btnCloseModal" class="btn primary">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/wheel.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
