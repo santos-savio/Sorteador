@@ -1,28 +1,138 @@
-/* Logica da UI: carrega estado do backend, renderiza e dispara sorteios. */
+/* Logica da UI: carrega estado do localStorage, renderiza e dispara sorteios. */
 (() => {
   const $ = (sel) => document.querySelector(sel);
 
+  // ---------- Gerenciamento de estado (localStorage) ----------
+  const DEFAULT_PALETTE = [
+    "#e74c3c", "#e67e22", "#f1c40f", "#2ecc71", "#1abc9c",
+    "#3498db", "#9b59b6", "#34495e", "#e84393", "#00cec9",
+  ];
+  const STORAGE_KEY = "sorteador_state";
+  const HISTORY_LIMIT = 200;
+
+  function newUUID() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "");
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
+  function nowIso() { return new Date().toISOString(); }
+
+  function makeEntry(text, index = 0, color = null) {
+    return {
+      id: newUUID(),
+      text,
+      color: color || DEFAULT_PALETTE[index % DEFAULT_PALETTE.length],
+      weight: 1,
+      enabled: true,
+      drawn: false,
+    };
+  }
+
+  function defaultConfig() {
+    return { spinDurationMs: 6000, mode: "repeat", shuffleOnSpin: false, sound: true, title: "Sorteador" };
+  }
+
+  function defaultState() {
+    return {
+      entries: ["Ana", "Bruno", "Carla", "Diego", "Eva", "Felipe"].map((n, i) => makeEntry(n, i)),
+      config: defaultConfig(),
+      history: [],
+    };
+  }
+
+  function normalizeState(data) {
+    const out = defaultState();
+    Object.assign(out.config, data.config || {});
+    out.history = Array.isArray(data.history) ? data.history : [];
+    const entries = (data.entries || []).map((e, i) => {
+      const text = String(e.text || "").trim();
+      if (!text) return null;
+      return {
+        id: String(e.id || newUUID()),
+        text,
+        color: (typeof e.color === "string" && e.color) || DEFAULT_PALETTE[i % DEFAULT_PALETTE.length],
+        weight: Math.max(1, parseInt(e.weight || 1, 10)),
+        enabled: e.enabled !== false,
+        drawn: !!e.drawn,
+      };
+    }).filter(Boolean);
+    if (entries.length) out.entries = entries;
+    return out;
+  }
+
+  function loadFromStorage() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return normalizeState(JSON.parse(raw));
+    } catch (_) {}
+    return defaultState();
+  }
+
+  function saveToStorage() {
+    try {
+      if (state.history.length > HISTORY_LIMIT) state.history = state.history.slice(0, HISTORY_LIMIT);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  // ---------- Sorteio (client-side) ----------
+  function eligibleIndices() {
+    const mode = state.config.mode || "repeat";
+    return state.entries.reduce((acc, e, i) => {
+      if (!e.enabled) return acc;
+      if (mode === "unique" && e.drawn) return acc;
+      acc.push(i);
+      return acc;
+    }, []);
+  }
+
+  function weightedChoice(idxs, weights) {
+    const total = weights.reduce((a, b) => a + b, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < idxs.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return idxs[i];
+    }
+    return idxs[idxs.length - 1];
+  }
+
+  function performSpin() {
+    if (state.config.shuffleOnSpin) state.entries.sort(() => Math.random() - 0.5);
+    const idxs = eligibleIndices();
+    if (!idxs.length) return null;
+    const weights = idxs.map(i => Math.max(1, parseInt(state.entries[i].weight || 1, 10)));
+    const winnerIdx = weightedChoice(idxs, weights);
+    const entry = state.entries[winnerIdx];
+
+    // Snapshot da roda antes de marcar como sorteado (para a animacao).
+    const spinEntries = state.entries.filter(e => e.enabled && !e.drawn).map(e => ({ ...e }));
+    const visibleIndex = spinEntries.findIndex(e => e.id === entry.id);
+
+    state.history.unshift({ id: newUUID(), entryId: entry.id, text: entry.text, at: nowIso() });
+    if (state.config.mode === "unique") entry.drawn = true;
+    saveToStorage();
+
+    return { winner: { ...entry }, visibleIndex, spinEntries };
+  }
+
+  // ---------- Estado e roda ----------
   const state = { entries: [], config: {}, history: [] };
   const wheel = new Wheel($("#wheel"));
 
-  // ---------- Modo projeção / controle ----------
+  // ---------- Modo projecao / controle ----------
   // A janela com ?mode=projection mostra so a roda em tela cheia (sem config).
   // A janela principal que a abriu vira "controle" e comanda via BroadcastChannel.
   const params = new URLSearchParams(location.search);
   const isProjection = params.get("mode") === "projection";
 
-  // Token único por roleta: isola a comunicação entre cada controle e a SUA
-  // projeção. Assim, várias roletas abertas (abas/janelas) não interferem
-  // umas nas outras. A projeção herda o token do controle via URL; o controle
-  // mantém o token na sessionStorage para sobreviver a um reload.
-  function newToken() {
-    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-  }
+  // Token unico por roleta: isola a comunicacao entre cada controle e a SUA
+  // projecao. Assim, varias roletas abertas (abas/janelas) nao interferem
+  // umas nas outras. A projecao herda o token do controle via URL; o controle
+  // mantem o token na sessionStorage para sobreviver a um reload.
   const wheelToken = isProjection
     ? (params.get("token") || "default")
     : (sessionStorage.getItem("wheelToken") || (() => {
-        const t = newToken();
+        const t = newUUID();
         sessionStorage.setItem("wheelToken", t);
         return t;
       })());
@@ -37,9 +147,9 @@
     if (channel) channel.postMessage({ ...msg, token: wheelToken });
   }
 
-  let projectionWin = null;   // referencia da janela de projeção (na janela de controle)
+  let projectionWin = null;   // referencia da janela de projecao (na janela de controle)
   let spinFallback = null;    // timeout de seguranca ao delegar o giro
-  let pendingHistory = null;  // histórico retido até a roleta parar (modo controlador)
+  let pendingHistory = null;  // historico retido ate a roleta parar (modo controlador)
 
   function controllerActive() {
     return !isProjection && projectionWin && !projectionWin.closed;
@@ -64,21 +174,8 @@
   }
   wheel.onTick = tick;
 
-  // ---------- API ----------
-  const api = {
-    async get(url) { return (await fetch(url)).json(); },
-    async post(url, body) {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}),
-      });
-      return { ok: res.ok, status: res.status, data: await res.json() };
-    },
-  };
-
   // ---------- Render ----------
-  // syncWheel=false mantém a roda como está (usado após o giro, para só remover
+  // syncWheel=false mantem a roda como esta (usado apos o giro, para so remover
   // o sorteado quando o modal do vencedor for fechado).
   function render(syncWheel = true) {
     $("#appTitle").textContent = state.config.title || "Sorteador";
@@ -136,8 +233,8 @@
   }
 
   // ---------- Acoes ----------
-  async function loadState() {
-    Object.assign(state, await api.get("/api/state"));
+  function loadState() {
+    Object.assign(state, loadFromStorage());
     render();
     if (isProjection) { wheel._resizeForDPR(); wheel.draw(); }
   }
@@ -146,24 +243,31 @@
     if (controllerActive()) send({ type: "refresh" });
   }
 
-  async function applyText() {
+  function applyText() {
     const lines = $("#entriesText").value.split("\n").map((l) => l.trim()).filter(Boolean);
-    const { data } = await api.post("/api/entries", { entries: lines });
-    Object.assign(state, data);
+    const existing = {};
+    state.entries.forEach(e => { existing[e.text] = e; });
+    state.entries = lines.map((text, i) => existing[text] ? { ...existing[text] } : makeEntry(text, i));
+    saveToStorage();
     render();
     pushRefresh();
   }
 
-  async function saveAdvanced() {
-    const { data } = await api.post("/api/entries", { entries: state.entries });
-    Object.assign(state, data);
+  function saveAdvanced() {
+    saveToStorage();
     render();
     pushRefresh();
   }
 
-  async function saveConfig(patch) {
-    const { data } = await api.post("/api/config", patch);
-    state.config = data;
+  function saveConfig(patch) {
+    if ("spinDurationMs" in patch)
+      state.config.spinDurationMs = Math.max(500, Math.min(60000, parseInt(patch.spinDurationMs, 10)));
+    if ("mode" in patch && (patch.mode === "repeat" || patch.mode === "unique"))
+      state.config.mode = patch.mode;
+    if ("shuffleOnSpin" in patch) state.config.shuffleOnSpin = !!patch.shuffleOnSpin;
+    if ("sound" in patch) state.config.sound = !!patch.sound;
+    if ("title" in patch) state.config.title = String(patch.title).slice(0, 120);
+    saveToStorage();
     render();
     pushRefresh();
   }
@@ -184,44 +288,42 @@
     setSpinDisabled(true);
     let delegated = false;
     try {
-      const { ok, data } = await api.post("/api/spin", {});
-      if (!ok) {
-        alert(data.message || "Nao foi possivel sortear.");
+      const result = performSpin();
+      if (!result) {
+        alert("Nenhum candidato disponivel. No modo exclusivo, reinicie os sorteados.");
         return;
       }
       if (controllerActive()) {
-        // Delega a animação para a janela de projeção.
+        // Delega a animacao para a janela de projecao.
         delegated = true;
+        // O historico ja foi atualizado por performSpin; retemos ate a animacao terminar.
+        const newHistory = state.history;
+        state.history = state.history.slice(1);
+        pendingHistory = newHistory;
         send({
           type: "spin",
-          winner: data.winner,
-          visibleIndex: data.visibleIndex,
-          spinEntries: data.spinEntries,
-          entries: data.entries,
-          history: data.history,
+          winner: result.winner,
+          visibleIndex: result.visibleIndex,
+          spinEntries: result.spinEntries,
+          entries: state.entries,
+          history: newHistory,
           durationMs: state.config.spinDurationMs,
         });
         clearTimeout(spinFallback);
         spinFallback = setTimeout(() => {
-          // Fallback: se a projeção não responder, aplica o histórico pendente.
+          // Fallback: se a projecao nao responder, aplica o historico pendente.
           if (pendingHistory) { state.history = pendingHistory; pendingHistory = null; renderHistory(); }
           spinning = false;
           setSpinDisabled(false);
         }, state.config.spinDurationMs + 5000);
-        // Atualiza a lista de entradas agora (o vencedor já saiu da roda),
-        // mas retém o histórico até a roleta parar na projeção.
-        state.entries = data.entries;
-        pendingHistory = data.history;
         render();
       } else {
-        // Anima localmente (janela normal ou a própria projeção).
-        wheel.setEntries(data.spinEntries);
-        await wheel.spinTo(data.visibleIndex, state.config.spinDurationMs);
-        state.entries = data.entries;
-        state.history = data.history;
-        showWinner(data.winner);
-        render(false); // mantém o vencedor na roda até fechar o modal
-        // Se o giro partiu da projeção, avisa o controle para sincronizar.
+        // Anima localmente (janela normal ou a propria projecao).
+        wheel.setEntries(result.spinEntries);
+        await wheel.spinTo(result.visibleIndex, state.config.spinDurationMs);
+        showWinner(result.winner);
+        render(false); // mantem o vencedor na roda ate fechar o modal
+        // Se o giro partiu da projecao, avisa o controle para sincronizar.
         if (isProjection) send({ type: "refresh" });
       }
     } finally {
@@ -232,7 +334,7 @@
     }
   }
 
-  // Executa o giro na janela de projeção a partir do comando do controle.
+  // Executa o giro na janela de projecao a partir do comando do controle.
   async function doProjectionSpin(m) {
     if (spinning) return;
     spinning = true;
@@ -241,7 +343,7 @@
     state.entries = m.entries;
     state.history = m.history;
     showWinner(m.winner);
-    render(false); // mantém o vencedor na roda até fechar o modal
+    render(false); // mantem o vencedor na roda ate fechar o modal
     spinning = false;
     send({ type: "winner-shown" });
   }
@@ -254,11 +356,11 @@
 
   function closeWinner() {
     $("#winnerModal").classList.add("hidden");
-    wheel.setEntries(state.entries); // só agora o sorteado sai da roda
+    wheel.setEntries(state.entries); // so agora o sorteado sai da roda
     if (controllerActive()) send({ type: "close-modal" });
   }
 
-  // ---------- Tela cheia (projeção) ----------
+  // ---------- Tela cheia (projecao) ----------
   function tryFullscreen() {
     const el = document.documentElement;
     if (!document.fullscreenElement && el.requestFullscreen) {
@@ -270,13 +372,13 @@
   if (channel) {
     channel.onmessage = (ev) => {
       const m = ev.data || {};
-      // Ignora mensagens de outra roleta (proteção extra além do canal isolado).
+      // Ignora mensagens de outra roleta (protecao extra alem do canal isolado).
       if (m.token && m.token !== wheelToken) return;
       if (isProjection) {
         if (m.type === "spin") doProjectionSpin(m);
         else if (m.type === "close-modal") {
           $("#winnerModal").classList.add("hidden");
-          wheel.setEntries(state.entries); // remove o sorteado da roda na projeção
+          wheel.setEntries(state.entries); // remove o sorteado da roda na projecao
         }
         else if (m.type === "refresh") loadState();
       } else if (m.type === "winner-shown") {
@@ -285,7 +387,7 @@
         spinning = false;
         setSpinDisabled(false);
       } else if (m.type === "refresh") {
-        // A projeção sorteou por conta própria: sincroniza lista/histórico.
+        // A projecao sorteou por conta propria: sincroniza lista/historico.
         loadState();
       }
     };
@@ -315,13 +417,13 @@
   document.addEventListener("click", closeFsMenu);
   $("#fsMenu").addEventListener("click", (e) => e.stopPropagation());
 
-  // Opção 1: tela cheia única (mesma janela, sem config)
+  // Opcao 1: tela cheia unica (mesma janela, sem config)
   function enterSingleFs() {
     closeFsMenu();
     document.body.classList.add("single-fs-mode");
     $("#btnExitSingle").classList.remove("hidden");
     document.documentElement.requestFullscreen?.().catch(() => {});
-    // Recalcula canvas após transição de layout
+    // Recalcula canvas apos transicao de layout
     requestAnimationFrame(() => { wheel._resizeForDPR(); wheel.draw(); });
   }
   function exitSingleFs() {
@@ -339,14 +441,14 @@
     }
   });
 
-  // Opção 2: tela cheia + controles (projeção em nova janela)
+  // Opcao 2: tela cheia + controles (projecao em nova janela)
   function openProjection() {
     closeFsMenu();
     if (controllerActive()) { projectionWin.focus(); return; }
     const url = location.pathname + "?mode=projection&token=" + encodeURIComponent(wheelToken);
     projectionWin = window.open(url, "sorteador_projecao_" + wheelToken);
     if (!projectionWin) {
-      alert("Permita pop-ups para abrir a janela de projeção.");
+      alert("Permita pop-ups para abrir a janela de projecao.");
       return;
     }
     const status = document.querySelector(".ctrl-status");
@@ -356,7 +458,7 @@
   }
   $("#btnFsProjection").addEventListener("click", openProjection);
 
-  // Sai do modo controle se a projeção for fechada manualmente
+  // Sai do modo controle se a projecao for fechada manualmente
   setInterval(() => {
     if (document.body.classList.contains("controller-mode") &&
         (!projectionWin || projectionWin.closed)) {
@@ -403,11 +505,11 @@
     wheel.setEntries(state.entries);
   });
   $("#advancedList").addEventListener("change", saveAdvanced);
-  $("#advancedList").addEventListener("click", async (ev) => {
+  $("#advancedList").addEventListener("click", (ev) => {
     if (!ev.target.classList.contains("del")) return;
     const id = ev.target.dataset.id;
     state.entries = state.entries.filter((e) => e.id !== id);
-    await saveAdvanced();
+    saveAdvanced();
   });
 
   // config
@@ -425,55 +527,75 @@
     saveConfig({ title: e.target.textContent.trim() || "Sorteador" }));
 
   // topbar
-  $("#btnShuffle").addEventListener("click", async () => {
-    const { data } = await api.post("/api/shuffle", {});
-    state.entries = data;
+  $("#btnShuffle").addEventListener("click", () => {
+    state.entries.sort(() => Math.random() - 0.5);
+    saveToStorage();
     render();
     pushRefresh();
   });
-  $("#btnExport").addEventListener("click", () => { window.location = "/api/export"; });
+
+  $("#btnExport").addEventListener("click", () => {
+    const now = new Date();
+    const stamp = now.getFullYear()
+      + String(now.getMonth() + 1).padStart(2, "0")
+      + String(now.getDate()).padStart(2, "0")
+      + "-" + String(now.getHours()).padStart(2, "0")
+      + String(now.getMinutes()).padStart(2, "0")
+      + String(now.getSeconds()).padStart(2, "0");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(
+      new Blob([JSON.stringify(state, null, 2)], { type: "application/json" })
+    );
+    a.download = `sorteador-${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
   $("#fileImport").addEventListener("change", async (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
     try {
       const json = JSON.parse(await file.text());
-      const { ok, data } = await api.post("/api/import", json);
-      if (!ok) { alert("JSON invalido."); return; }
-      Object.assign(state, data);
+      if (typeof json !== "object" || json === null) { alert("JSON invalido."); return; }
+      Object.assign(state, normalizeState(json));
+      saveToStorage();
       render();
       pushRefresh();
     } catch (_) { alert("Nao foi possivel ler o arquivo JSON."); }
     ev.target.value = "";
   });
-  $("#btnReset").addEventListener("click", async () => {
+
+  $("#btnReset").addEventListener("click", () => {
     if (!confirm("Reiniciar todos os sorteados e limpar o historico?")) return;
-    const { data } = await api.post("/api/reset", { clearHistory: true });
-    Object.assign(state, data);
+    state.entries.forEach(e => { e.drawn = false; });
+    state.history = [];
+    saveToStorage();
     render();
     pushRefresh();
   });
-  $("#btnClearHistory").addEventListener("click", async () => {
-    const { data } = await api.post("/api/reset", { clearHistory: true });
-    Object.assign(state, data);
+
+  $("#btnClearHistory").addEventListener("click", () => {
+    state.history = [];
+    saveToStorage();
     render();
     pushRefresh();
   });
 
   // modal
   $("#btnCloseModal").addEventListener("click", closeWinner);
-  $("#btnRemoveWinner").addEventListener("click", async () => {
+  $("#btnRemoveWinner").addEventListener("click", () => {
     const id = $("#winnerModal").dataset.winnerId;
     state.entries = state.entries.filter((e) => e.id !== id);
-    await saveAdvanced();
+    saveAdvanced();
     closeWinner();
   });
 
   window.addEventListener("resize", () => { wheel._resizeForDPR(); wheel.draw(); });
 
-  // ---------- Inicialização do modo projeção ----------
+  // ---------- Inicializacao do modo projecao ----------
   if (isProjection) {
     document.body.classList.add("projection-mode");
-    // A dica de tela cheia aparece por apenas 2,5s após abrir a projeção.
+    // A dica de tela cheia aparece por apenas 2,5s apos abrir a projecao.
     const hint = $("#fsHint");
     hint.classList.remove("hidden");
     setTimeout(() => hint.classList.add("hidden"), 2500);

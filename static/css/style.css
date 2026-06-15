@@ -203,6 +203,24 @@ body {
 .exit-single.hidden { display: none; }
 .single-fs-mode:hover .exit-single,
 .single-fs-mode .exit-single:focus { opacity: 1; }
+/* Marca no topo esquerdo, visível apenas em tela cheia / projeção */
+.fs-brand {
+  display: none;
+  position: fixed;
+  top: 16px;
+  left: 18px;
+  z-index: 50;
+  color: rgba(255,255,255,0.6);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  pointer-events: none;
+  user-select: none;
+}
+.single-fs-mode .fs-brand,
+.projection-mode .fs-brand { display: block; }
+
 .tab-panel { display: none; padding: 18px; }
 .tab-panel.active { display: block; }
 
