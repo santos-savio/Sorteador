@@ -23,8 +23,10 @@ import uuid          # futuro: identificadores de usuario e template
 from datetime import datetime, timezone  # futuro: timestamps de templates
 
 from flask import Flask, jsonify, request, render_template, Response
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_prefix=1)
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 # STATE_FILE = os.path.join(DATA_DIR, "state.json")  # futuro: arquivo de estado por usuario
